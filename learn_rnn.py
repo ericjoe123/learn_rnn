@@ -8,9 +8,12 @@ class model():
 		self.mode=mode
 		self.inputs = tf.placeholder(tf.int32, [None,None])
 		self.target = tf.placeholder(tf.int32, [None,None])
+		self.inputs_len = tf.placeholder(tf.int32, [None,])
+		self.target_len = tf.placeholder(tf.int32, [None,])
 		self.embeddings_var = tf.get_variable("embedding_var", [5, 2])
 		#self.embeddings_var = tf.Variable(tf.truncated_normal(shape=[5, 2], stddev=0.1),name='encoder_embedding')
 		self.embedded_gno = tf.nn.embedding_lookup(self.embeddings_var,self.inputs )
+		self.embedded_target = tf.nn.embedding_lookup(self.embeddings_var,self.target)
 		self.encoded_gno,self.h1 = self.encoder()
 		self.predict_gno=self.decoder("predict")		
 	def encoder(self):
@@ -26,16 +29,25 @@ class model():
 			start_tokens = tf.tile(tf.constant([0],dtype=tf.int32),[3],name='start_token')
 			helper = tf.contrib.seq2seq.GreedyEmbeddingHelper(self.embeddings_var,start_tokens,3)
 			predicting_decoder = tf.contrib.seq2seq.BasicDecoder(cell,helper,self.h1,output_layer)
-			predicting_decoder_output,_,_ = tf.contrib.seq2seq.dynamic_decode(predicting_decoder,impute_finished = True,
+			predicting_decoder_output,_,_ = tf.contrib.seq2seq.dynamic_decode(predicting_decoder,
+										impute_finished = True,
 										maximum_iterations = max_len)
-			return predicting_decoder_output 
+			return predicting_decoder_output
+		#if self.mode=='training':
+		#	training_helper = tf.contrib.seq2seq.TrainingHelper(inputs = self.embedded_target,
+                #                                            sequence_length = target_sequence_length,
+                 #                                           time_major = False)
+		#	return  
 	def train(self):
 		x=[[2,1,2,3],[2,2,1,3],[2,2,1,3]]
-		y=[[2,1,2,3],[2,2,1,3],[2,2,1,3]]
+		x_len=[4,4,4]
+		y=[[0,1,2,3],[0,2,1,3],[0,2,1,3]]
+		y_len=[4,4,4] 
 		with tf.Session() as sess:
 			tf.get_variable_scope().reuse_variables()
 			sess.run(tf.global_variables_initializer())
-			result=sess.run([self.predict_gno,self.embeddings_var],feed_dict={self.inputs:x,self.target:y})
+			result=sess.run([self.predict_gno,self.embeddings_var,self.inputs_len,self.target_len],feed_dict={self.inputs:x,self.target:y,
+					self.inputs_len:x_len,self.target_len:y_len})
 			print result
 
 
