@@ -4,8 +4,9 @@ import numpy as np
 from tensorflow.contrib.seq2seq import *
 from tensorflow.python.layers.core import Dense
 class model():
-	def __init__(self,embedding_dim,target_len):
+	def __init__(self,embedding_dim,target_len,seq_len):
 		#self.mode=mode
+		self.seq_len=seq_len
 		self.max_len=tf.constant(target_len,dtype=tf.int32)
 		self.embedding_dim=embedding_dim
 		self.inputs = tf.placeholder(tf.int32, [None,None])
@@ -13,7 +14,7 @@ class model():
 		self.target = tf.placeholder(tf.int32, [None,None])
 		self.inputs_len = tf.placeholder(tf.int32, [None,])
 		self.target_len = tf.placeholder(tf.int32, [None,])
-		self.embeddings_var = tf.get_variable("embedding_var", [4,self.embedding_dim])
+		self.embeddings_var = tf.get_variable("embedding_var", [self.seq_len,self.embedding_dim])
 		#self.embeddings_var = tf.Variable(tf.truncated_normal(shape=[5, 2], stddev=0.1),name='encoder_embedding')
 		self.embedded_gno = tf.nn.embedding_lookup(self.embeddings_var,self.inputs )
 		self.embedded_target = tf.nn.embedding_lookup(self.embeddings_var,self.encoder_input)
@@ -40,7 +41,7 @@ class model():
 	def decoder(self,mode):
 		cell = tf.nn.rnn_cell.BasicLSTMCell(num_units=10)
 		#output_layer = tf.layers.Dense(5,kernel_initializer=tf.truncated_normal_initializer(mean=0.1,stddev=0.1))
-		output_layer = tf.layers.Dense(4)
+		output_layer = tf.layers.Dense(self.seq_len)
 		if mode=='predict':
 			start_tokens = tf.tile(tf.constant([0],dtype=tf.int32),[3],name='start_token')
 			helper = tf.contrib.seq2seq.GreedyEmbeddingHelper(self.embeddings_var,start_tokens,3)
@@ -60,11 +61,11 @@ class model():
 		return  out
 	def train(self):
 		#index[0] == 'GO'   ,index[3] == 'EOS'
-		x=[[2,1,2,3],[2,2,1,3],[2,2,1,3]]   
+		x=[[0,1,2,3],[0,2,1,3],[0,2,1,3]]   
 		x_len=[4,4,4]
-		y=[[0,2,1],[0,1,2],[0,1,2]]
+		y=[[0,1,2],[0,2,1],[0,2,1]]
 		y_len=[3,3,3]
-		y_target=[[2,1,3],[1,2,3],[1,2,3]]
+		y_target=[[1,2,3],[2,1,3],[2,1,3]]
 		with tf.Session() as sess:
 			tf.get_variable_scope().reuse_variables()
 			sess.run(tf.global_variables_initializer())
@@ -94,7 +95,7 @@ class model():
 
 
 if __name__== '__main__':
-	encoder=model(10,3)
+	encoder=model(10,3,4)
 	encoder.train()
 	encoder.predict()
 '''
