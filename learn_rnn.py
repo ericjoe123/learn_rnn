@@ -3,85 +3,111 @@ import tensorflow as tf
 import numpy as np
 from tensorflow.contrib.seq2seq import *
 from tensorflow.python.layers.core import Dense
+from datetime import datetime,timedelta
+from pyspark.sql import SparkSession, DataFrame, Row, Window
+from pyspark.sql import functions as F
+from pyspark.sql.types import *
+import pandas as pd
+import sys
+import mysql.connector
+from random import randint
+import time
+spark = SparkSession.builder\
+        .appName("gno2gno_recommend")\
+        .master("local")\
+        .getOrCreate()
+
 class model():
-	def __init__(self,embedding_dim,rnn_size):
+	def __init__(self,embedding_dim,rnn_size,index_size):
 		#self.mode=mode
-		max_target_len=5
 		self.rnn_size=rnn_size
-		self.index_size = 10
-		self.index_sizes = tf.to_int32(tf.placeholder(tf.int32,[None]),name="index_size")
-		self.max_len=tf.constant(max_target_len,dtype=tf.int32)
-		self.embedding_dim=embedding_dim
-		self.inputs = tf.placeholder(tf.int32, [None,None])
-		self.batch_size= tf.placeholder(tf.int32,[None])
-		self.encoder_input = tf.placeholder(tf.int32, [None,None])
-		self.target = tf.placeholder(tf.int32, [None,None])
-		self.inputs_len = tf.placeholder(tf.int32, [None,])
-		self.target_len = tf.placeholder(tf.int32, [None,])
-		self.embedded_gno = tf.contrib.layers.embed_sequence(self.inputs,self.index_size,self.embedding_dim)
-		self.embeddings_var = tf.get_variable("embedding_var", [self.index_size,self.embedding_dim])
-		#self.embeddings_var = tf.Variable(tf.truncated_normal(shape=[5, 2], stddev=0.1),name='encoder_embedding')
-		#self.embedded_gno = tf.nn.embedding_lookup(self.embeddings_var,self.inputs )
-		self.embedded_target = tf.nn.embedding_lookup(self.embeddings_var,self.encoder_input)
+		self.index_size = index_size
+		with tf.variable_scope("Input_Layer"):
+			self.max_len=tf.placeholder(tf.int32,shape=(),name="max_len")
+			self.inputs = tf.placeholder(tf.int32, [None,None])
+			self.batch_size= tf.placeholder(tf.int32,[None])
+			self.encoder_input = tf.placeholder(tf.int32, [None,None])
+			self.target = tf.placeholder(tf.int32, [None,None])
+			self.inputs_len = tf.placeholder(tf.int32, [None,])
+			self.target_len = tf.placeholder(tf.int32, [None,])
+		with tf.variable_scope("Embedding_Layer"):
+			self.embedding_dim=embedding_dim
+			self.embedded_gno = tf.contrib.layers.embed_sequence(self.inputs,self.index_size,self.embedding_dim)
+			self.embeddings_var = tf.get_variable("embedding_var", [self.index_size,self.embedding_dim])
+			#self.embeddings_var = tf.Variable(tf.truncated_normal(shape=[5, 2], stddev=0.1),name='encoder_embedding')
+			#self.embedded_gno = tf.nn.embedding_lookup(self.embeddings_var,self.inputs )
+			self.embedded_target = tf.nn.embedding_lookup(self.embeddings_var,self.encoder_input)
 		self.encoded_gno,self.h1 = self.encoder()
-                self.trained_gno=self.decoder("training")
-		self.predict_gno=self.decoder("predict")		
+                self.trained_gno,self.predict_gno=self.decoder()	
 		self.loss = self.eva()
-		
-	def eva(self):
-		training_logits = tf.identity(self.trained_gno.rnn_output,'logits')
-		masks = tf.sequence_mask(self.target_len,self.max_len,dtype=tf.float32,name="masks")
-		cost = tf.contrib.seq2seq.sequence_loss(training_logits,self.target,masks)	
-		#return masks,self.target
-		optimizer = tf.train.AdamOptimizer()
-		#gradients = optimizer.compute_gradients(cost)
-		#capped_gradients = [(tf.clip_by_value(grad, -5., 5.), var) for grad, var in gradients if grad is not None]
-		#train_op = optimizer.apply_gradients(capped_gradients)
-		train_op=optimizer.minimize(cost)
-		return  train_op,cost,masks
+		 
+	def data_preprocess(self):
+		pass	
 	def encoder(self):
-		cell = tf.nn.rnn_cell.BasicLSTMCell(num_units=self.rnn_size) 
-		outputs, h1 = tf.nn.dynamic_rnn(cell, self.embedded_gno,sequence_length=self.inputs_len,dtype=tf.float32)
-		return outputs,h1
-	def decoder(self,mode):
-		cell = tf.nn.rnn_cell.BasicLSTMCell(num_units=self.rnn_size)
-		#output_layer = tf.layers.Dense(5,kernel_initializer=tf.truncated_normal_initializer(mean=0.1,stddev=0.1))
-		output_layer = tf.layers.Dense(self.index_size)
-		if mode=='predict':
+		with tf.variable_scope("Encoder"):
+			cell = tf.contrib.rnn.LSTMCell(self.rnn_size,initializer=tf.random_uniform_initializer(-0.1,0.1,seed=2))
+			#cell = tf.nn.rnn_cell.BasicLSTMCell(num_units=self.rnn_size) 
+			outputs, h1 = tf.nn.dynamic_rnn(cell, self.embedded_gno,sequence_length=self.inputs_len,dtype=tf.float32)
+			return outputs,h1
+	def decoder(self):
+		with tf.variable_scope("Decoder"):
+			cell = tf.contrib.rnn.LSTMCell(self.rnn_size,initializer=tf.random_uniform_initializer(-0.1,0.1,seed=2))
+			#cell = tf.nn.rnn_cell.BasicLSTMCell(num_units=self.rnn_size)
+			#output_layer = tf.layers.Dense(5,kernel_initializer=tf.truncated_normal_initializer(mean=0.1,stddev=0.1))
+			output_layer = tf.layers.Dense(self.index_size)
+                #with tf.variable_scope("Training"):
+                        training_helper = tf.contrib.seq2seq.TrainingHelper(inputs = self.embedded_target,
+                                                           sequence_length = self.target_len,
+                                                          time_major = False)
+                        training_decoder = tf.contrib.seq2seq.BasicDecoder(cell,training_helper,self.h1,output_layer)
+                        training_decoder_output,_,_ = tf.contrib.seq2seq.dynamic_decode(training_decoder,impute_finished=True,
+                                                                        maximum_iterations = self.max_len)
+                        out_train=training_decoder_output
+		
+		#with tf.variable_scope("Predicting_encoder"):
 			start_tokens = tf.tile(tf.constant([0],dtype=tf.int32),self.batch_size,name='start_token')
-			helper = tf.contrib.seq2seq.GreedyEmbeddingHelper(self.embeddings_var,start_tokens,1)
+			helper = tf.contrib.seq2seq.GreedyEmbeddingHelper(self.embeddings_var,start_tokens,tf.constant(1))
+			#predicting_decoder = tf.contrib.seq2seq.BeamSearchDecoder(cell,helper,self.h1,output_layer)
 			predicting_decoder = tf.contrib.seq2seq.BasicDecoder(cell,helper,self.h1,output_layer)
 			predicting_decoder_output,_,_ = tf.contrib.seq2seq.dynamic_decode(predicting_decoder,
 										impute_finished = True,
 										maximum_iterations = self.max_len)
-			out=predicting_decoder_output
-			#out=start_tokens
-		if mode=='training':
-			training_helper = tf.contrib.seq2seq.TrainingHelper(inputs = self.embedded_target,
-                                                            sequence_length = self.target_len,
-                                                           time_major = False)
-			training_decoder = tf.contrib.seq2seq.BasicDecoder(cell,training_helper,self.h1,output_layer)
-			training_decoder_output,_,_ = tf.contrib.seq2seq.dynamic_decode(training_decoder,impute_finished=True,
-                                                                        maximum_iterations = self.max_len)
-			out=training_decoder_output
-		return  out
+			out_predict=predicting_decoder_output
+		return  out_train,out_predict
+        def eva(self):
+                training_logits = tf.identity(self.trained_gno.rnn_output,'logits')
+                masks = tf.sequence_mask(self.target_len,self.max_len,dtype=tf.float32,name="masks")
+
+                cost = tf.contrib.seq2seq.sequence_loss(training_logits,self.target,masks)
+                #return masks,self.target
+                optimizer = tf.train.AdamOptimizer()
+                #gradients = optimizer.compute_gradients(cost)
+                #capped_gradients = [(tf.clip_by_value(grad, -5., 5.), var) for grad, var in gradients if grad is not None]
+                #train_op = optimizer.apply_gradients(capped_gradients)
+                train_op=optimizer.minimize(cost)
+                return  train_op,cost
+	
 	def train(self):
-		#index[0] == 'GO'   ,index[1] == 'EOS'
-		x=[[2,3,4,1,1],[2,3,2,1,1],[2,2,2,1,1]]   
-		x_len=[5,5,5]
-		y=[[0,2,5,7,1],[0,2,5,5,1],[0,2,4,4,1]]
-		y_len=[5,5,5]
-		y_target=[[2,5,7,1,1],[2,5,5,1,1],[2,4,4,1,1]]
+#		index[0] == 'GO'   ,index[1] == 'EOS'
+		#x=[[2,3,3,1],[2,4,2,1],[3,4,2,1]]   
+		#x_len=[3,3,3]
+		#y=[[0,2,5,8],[0,2,6,8],[0,3,7,9]]
+		#y_len=[4,4,4]
+		#y_target=[[2,5,8,1],[2,6,8,1],[3,7,9,1]]
+		df=spark.read.parquet('/user/webuser/tmp/gno2gno')
 		with tf.Session() as sess:
 			tf.get_variable_scope().reuse_variables()
 			sess.run(tf.global_variables_initializer())
-			for i in range(1,100):
+			writer = tf.summary.FileWriter("TensorBoard/", graph = sess.graph)
+			for i in range(1,1000):
 				result=sess.run([self.trained_gno,self.loss],
-					feed_dict={self.index_sizes:[10],
+					feed_dict={
 					self.batch_size:[len(x)],
 					self.inputs:x,self.encoder_input:y,
 					self.target:y_target,
-					self.inputs_len:x_len,self.target_len:y_len})
+					self.inputs_len:x_len,
+					self.target_len:y_len,
+					self.max_len:4})
 				print result
 			checkpoint = "data/trained_model.ckpt"
                 	saver = tf.train.Saver()
@@ -89,15 +115,16 @@ class model():
                 	print('Model Trained and Saved')
 
 	def predict(self):
-                x=[[2,3,4,1,1],[2,3,2,1,1],[2,2,2,1,1]]
-                x_len=[5,5,5]
+                x=[[2,4,3,1],[2,3,2,1],[3,2,2,1]]
+                x_len=[3,3,3]
                 with tf.Session() as sess:
+			#writer = tf.summary.FileWriter("TensorBoard/", graph = sess.graph)
 			checkpoint = "data/trained_model.ckpt"
 			saver=tf.train.Saver()
 			saver.restore(sess,checkpoint)
                         tf.get_variable_scope().reuse_variables()
                         result=sess.run([self.predict_gno],feed_dict={self.batch_size:[len(x)],self.inputs:x,
-                                        self.inputs_len:x_len})
+                                        self.inputs_len:x_len,self.max_len:4})
                         print result
                         #checkpoint = "data/trained_model.ckpt"
                         #saver = tf.train.Saver()
@@ -106,7 +133,8 @@ class model():
 
 
 if __name__== '__main__':
-	encoder=model(embedding_dim=256,rnn_size=256)
+	voc_size=587497
+	encoder=model(embedding_dim=128,rnn_size=128,index_size=10)
 	encoder.train()
 	encoder.predict()
 '''
