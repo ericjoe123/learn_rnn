@@ -2,6 +2,7 @@
 import tensorflow as tf
 import numpy as np
 from collections import Counter
+import jieba
 def  load_data():
 	with open('data_bot.txt','r') as file:
 		data=file.readlines()
@@ -12,16 +13,18 @@ def  load_data():
 	for i in data:
 		i=i.strip('\n')
 		i=i.split('\t')	
-		i[0]=i[0].decode('utf8')
-		i[1]=i[1].decode('utf8')
+		#i[0]=i[0].decode('utf8')
+		#i[1]=i[1].decode('utf8')
 		tmp_q=[]
 		tmp_a=[]
+		i[0] = jieba.cut(i[0], cut_all=False)
+		i[1] = jieba.cut(i[1], cut_all=False)
 		for word in i[0]:
-			if word != u' ':
+			if word != ' ':
 				tmp_q.append(word)
 				total.append(word)
 		for word in i[1]:
-			if word != u' ':
+			if word != ' ':
 				tmp_a.append(word)
 				total.append(word)
 		Q.append(tmp_q)
@@ -46,10 +49,14 @@ def extract_character_vocab(data):
 
     	return int_to_vocab,vocab_to_int
 if __name__ == '__main__':
-	_,_,data=load_data()
+	Q,A,data=load_data()
+	for i in range(len(Q)):
+		print Q[i]
+		print A[i]
+		print "========================"
 	#print data
-	int_to_vocab,vocab_to_int=extract_character_vocab(data)
+	#int_to_vocab,vocab_to_int=extract_character_vocab(data)
 	#for i in int_to_vocab:
 	#	print int_to_vocab[i] , i
 	
-	print vocab_to_int["<EOS>"]
+	#print vocab_to_int["<EOS>"]
