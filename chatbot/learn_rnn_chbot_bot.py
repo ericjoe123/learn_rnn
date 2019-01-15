@@ -193,16 +193,16 @@ class model():
 					self.target_len:y_len,
 					self.max_len:max(y_len)})
 				print result[1]
-				output=result[0].sample_id
-				out=self.transform_to_vocab(output)
+				#output=result[0].sample_id
+				#out=self.transform_to_vocab(output)
 			
-				for i in range(len(raw_input_x)):
+				#for i in range(len(raw_input_x)):
 					#print raw_input_x[i]
 					#print raw_input_y[i]
-					print "問句 : "+''.join(batch_x[i])
-					print "機器人回答 : "+''.join(out[i])
-					print "鄉民回答 : "+''.join(batch_y[i])
-					print "============================="
+				#	print "問句 : "+''.join(batch_x[i])
+				#	print "機器人回答 : "+''.join(out[i])
+				#	print "鄉民回答 : "+''.join(batch_y[i])
+				#	print "============================="
                 	if i%5==0:
 				saver = tf.train.Saver()
                 		saver.save(sess, checkpoint)

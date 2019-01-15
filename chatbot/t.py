@@ -13,12 +13,14 @@ def  load_data():
 	for i in data:
 		i=i.strip('\n')
 		i=i.split('\t')	
-		#i[0]=i[0].decode('utf8')
-		#i[1]=i[1].decode('utf8')
+		i[0]=i[0].decode('utf8')
+		i[1]=i[1].decode('utf8')
+		i[0]=i[0].split('<,>')
+		i[1]=i[1].split('<,>')
 		tmp_q=[]
 		tmp_a=[]
-		i[0] = jieba.cut(i[0], cut_all=False)
-		i[1] = jieba.cut(i[1], cut_all=False)
+		#i[0] = jieba.cut(i[0], cut_all=False)
+		#i[1] = jieba.cut(i[1], cut_all=False)
 		for word in i[0]:
 			if word != ' ':
 				tmp_q.append(word)
@@ -59,4 +61,4 @@ if __name__ == '__main__':
 	#for i in int_to_vocab:
 	#	print int_to_vocab[i] , i
 	
-	#print vocab_to_int["<EOS>"]
+	#print len(int_to_vocab)
