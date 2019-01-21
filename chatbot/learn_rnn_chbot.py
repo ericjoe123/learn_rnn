@@ -7,40 +7,42 @@ from datetime import datetime,timedelta
 import pandas as pd
 import sys
 import mysql.connector
-from random import randint
+import random
 import time
 import t
+import jieba
+reload(sys)
+sys.setdefaultencoding('utf8')
+
 class model():
 	def __init__(self,embedding_dim,rnn_size):
 		#self.mode=mode
-		self.rnn_size=rnn_size
-		with tf.variable_scope("Input_Layer"):
-			self.x_data,self.y_data,total_data=t.load_data() #read file
-			self.int_to_vocab,self.vocab_to_int=self.get_dict(total_data)#build the dict of vocav2int and  int2vocab 
-			self.index_size=len(self.vocab_to_int)	
-			self.max_len=tf.placeholder(tf.int32,shape=(),name="max_len")
-			self.inputs = tf.placeholder(tf.int32, [None,None])
-			self.batch_size= tf.placeholder(tf.int32,[None])
-			self.encoder_input = tf.placeholder(tf.int32, [None,None])
-			self.target = tf.placeholder(tf.int32, [None,None])
-			self.inputs_len = tf.placeholder(tf.int32, [None,])
-			self.target_len = tf.placeholder(tf.int32, [None,])
-		with tf.variable_scope("Embedding_Layer"):
-			self.embedding_dim=embedding_dim
-			self.embedded_gno = tf.contrib.layers.embed_sequence(self.inputs,self.index_size,self.embedding_dim)
-			self.embeddings_var = tf.get_variable("embedding_var", [self.index_size,self.embedding_dim])
-			#self.embeddings_var = tf.Variable(tf.truncated_normal(shape=[5, 2], stddev=0.1),name='encoder_embedding')
-			#self.embedded_gno = tf.nn.embedding_lookup(self.embeddings_var,self.inputs )
-			self.embedded_target = tf.nn.embedding_lookup(self.embeddings_var,self.encoder_input)
+		self.rnn_size=rnn_size	
+		self.x_data,self.y_data,total_data=t.load_data() #read file
+		self.int_to_vocab,self.vocab_to_int=self.get_dict(total_data)#build the dict of vocav2int and  int2vocab 
+		self.index_size=len(self.vocab_to_int)	
+		self.max_len=tf.placeholder(tf.int32,shape=(),name="max_len")
+		self.inputs = tf.placeholder(tf.int32, [None,None])
+		self.batch_size= tf.placeholder(tf.int32,[None])
+		self.encoder_input = tf.placeholder(tf.int32, [None,None])
+		self.target = tf.placeholder(tf.int32, [None,None])
+		self.inputs_len = tf.placeholder(tf.int32, [None,])
+		self.target_len = tf.placeholder(tf.int32, [None,])
+		self.embedding_dim=embedding_dim
+		self.embedded_gno = tf.contrib.layers.embed_sequence(self.inputs,self.index_size,self.embedding_dim)
+		self.embeddings_var = tf.get_variable("embedding_var", [self.index_size,self.embedding_dim])
+		#self.embeddings_var = tf.Variable(tf.truncated_normal(shape=[5, 2], stddev=0.1),name='encoder_embedding')
+		#self.embedded_gno = tf.nn.embedding_lookup(self.embeddings_var,self.inputs )
+		self.embedded_target = tf.nn.embedding_lookup(self.embeddings_var,self.encoder_input)
 		self.encoded_gno,self.h1 = self.encoder()
                 self.trained_gno,self.predict_gno=self.decoder()	
-		self.loss = self.eva()
-		 
+		self.loss = self.optimize("op")
+		self.eva_loss=self.optimize("eva") 
 	def get_dict(self,data):
-	        special_words = ['<PAD>','<GO>','<EOS>']
+	        special_words = ['<PAD>','<GO>','<EOS>','<None>']
 	        #set_words = list(set([character for line in data.split('\n') for character in line]))
 	        set_words=data
-	        int_to_vocab = {idx:word for idx,word in enumerate(set_words+special_words)}
+	        int_to_vocab = {idx:word for idx,word in enumerate(special_words+set_words)}
 	        vocab_to_int = {word:idx for idx,word in int_to_vocab.items()}
 
         	return int_to_vocab,vocab_to_int
@@ -65,10 +67,30 @@ class model():
 	def transform_to_int(self,batch):
 		result=[]
 		for seq in batch:
+			tmp=[]
 			for word_index in range(len(seq)):
-				seq[word_index]=self.vocab_to_int[seq[word_index]]
-			result.append(seq)
+				try:
+					tmp.append(self.vocab_to_int[seq[word_index]])
+					#seq[word_index]=self.vocab_to_int[seq[word_index]]
+				except:
+					tmp.append(self.vocab_to_int['<None>'])
+			result.append(tmp)
 		return result
+        def transform_to_vocab(self,batch):
+                result=[]
+                for seq in batch:
+			tmp=[]
+                        for word_index in range(len(seq)):
+				#print seq[word_index]	
+				if self.int_to_vocab[seq[word_index]]!="<EOS>" and seq[word_index] !=0 and seq[word_index] !=3 :
+					tmp.append(self.int_to_vocab[seq[word_index]])
+				if self.int_to_vocab[seq[word_index]]=="<EOS>":
+					break
+				#seq[word_index]=self.int_to_vocab[seq[word_index]]
+                        result.append(tmp)
+                return result
+
+
 	def process_target(self,target):
 		for seq_index in range(len(target)):
 			
@@ -110,91 +132,153 @@ class model():
 										impute_finished = True,
 										maximum_iterations = self.max_len)
 			out_predict=predicting_decoder_output
+			#predict_logits = tf.identity(predicting_decoder_output.rnn_output,'predict')
 		return  out_train,out_predict
-        def eva(self):
-                training_logits = tf.identity(self.trained_gno.rnn_output,'logits')
+        def optimize(self,op):
+                #predict_logits = tf.identity(self.trained_gno.rnn_output,'predict')
+		training_logits = tf.identity(self.trained_gno.rnn_output,'logits')
                 predicting_logits = tf.identity(self.predict_gno.sample_id)
 		masks = tf.sequence_mask(self.target_len,self.max_len,dtype=tf.float32,name="masks")
                 cost = tf.contrib.seq2seq.sequence_loss(training_logits,self.target,masks)
-                #return masks,self.target
-                optimizer = tf.train.AdamOptimizer()
-                #gradients = optimizer.compute_gradients(cost)
-                #capped_gradients = [(tf.clip_by_value(grad, -5., 5.), var) for grad, var in gradients if grad is not None]
-                #train_op = optimizer.apply_gradients(capped_gradients)
-                train_op=optimizer.minimize(cost)
-                return  train_op,cost
+                if op=="op":
+			#return masks,self.target
+                	optimizer = tf.train.AdamOptimizer()
+                	#gradients = optimizer.compute_gradients(cost)
+                	#capped_gradients = [(tf.clip_by_value(grad, -5., 5.), var) for grad, var in gradients if grad is not None]
+                	#train_op = optimizer.apply_gradients(capped_gradients)
+                	train_op=optimizer.minimize(cost)
+                	return  train_op,cost
+		elif op=="eva":
+			return cost
 	
 	def train(self):
 #		index[0] == 'GO'   ,index[1] == 'EOS'
+		checkpoint = "data_test/trained_model.ckpt"
 		batch_size=128
-		raw_input_x,input_x_len=self.fill_pad(self.x_data,batch_type="x")
-		raw_input_y,input_y_len=self.fill_pad(self.y_data,batch_type="y")
-		raw_input_target,input_y_len=self.fill_pad(self.y_data,batch_type="target")
-	
-		input_x=self.transform_to_int(raw_input_x)
-		input_y=self.transform_to_int(raw_input_y)
-		input_target=self.transform_to_int(raw_input_target)
-
-		#print int_to_index
-		#for index in range(0,256/batch_size):
-		#	print index
-		
 		with tf.Session() as sess:
-			tf.get_variable_scope().reuse_variables()
-			sess.run(tf.global_variables_initializer())
+			try:
+                        	saver=tf.train.Saver()
+                        	saver.restore(sess,checkpoint)
+				#tf.get_variable_scope().reuse_variables()
+			except:
+				
+				tf.get_variable_scope().reuse_variables()
+				sess.run(tf.global_variables_initializer())
 			#writer = tf.summary.FileWriter("TensorBoard/", graph = sess.graph)
 			#for index in range(0,50/batch_size):
-			for index in range(0,10000/batch_size):
-				i=index*batch_size
-				x = list(input_x[i:i+batch_size])
-                                x_len = list(input_x_len[index:index+batch_size])
-                                y = list(input_y[index:index+batch_size])
-                                y_len = list(input_y_len[index:index+batch_size])
-                     
-                                y_target = list(input_target[index:index+batch_size])
-				print max(y_len)
-				result = sess.run([self.trained_gno,self.loss],
-					feed_dict={
-					self.batch_size:[len(x)],
-					self.inputs:x,self.encoder_input:y,
-					self.target:y_target,
-					self.inputs_len:x_len,
-					self.target_len:y_len,
-					self.max_len:max(y_len)})
-				print result[1]
+			total_data_len=len(self.x_data)
+			#for i in range(len(self.x_data)):
+			#	print "Q : "+"".join(self.x_data[i])
+			#	print "A : "+"".join(self.y_data[i])
+			#	print "============================"
+			epoch=100
+			for times in range(0,epoch):	
+				#tmp=zip(self.x_data,self.y_data)
+                		#random.shuffle(tmp)
+                		#source_data_x, source_data_y = zip(*tmp)
+				source_data_x=self.x_data
+				source_data_y=self.y_data
+				print source_data_x
+				print source_data_y
+				for index in range(0,1):
+					i=index*batch_size
+					batch_x = list(source_data_x[i:i+batch_size])
+                                	batch_y = list(source_data_y[i:i+batch_size])
+					raw_input_x,x_len=self.fill_pad(batch_x,batch_type="x")
+		                	raw_input_y,y_len=self.fill_pad(batch_y,batch_type="y")
+                			raw_input_target,y_target_len=self.fill_pad(batch_y,batch_type="target")
+					#print y_len
+                			x=self.transform_to_int(raw_input_x)
+                			y=self.transform_to_int(raw_input_y)
+		                	y_target=self.transform_to_int(raw_input_target)
+					result = sess.run([self.predict_gno,self.trained_gno,self.loss],
+						feed_dict={
+						self.batch_size:[len(x)],
+						self.inputs:x,self.encoder_input:y,
+						self.target:y_target,
+						self.inputs_len:x_len,
+						self.target_len:y_len,
+						self.max_len:max(y_len)})
+					print "epoch : "+str(times)
+					print "batch : "+str(i)+"~"+str(i+batch_size)
+					predict=result[0]
+					result=result[1:]
+					print result[1]
+					#print predict[1]
+						
+					output=result[0].sample_id
+					out=self.transform_to_vocab(output)
+					predict=predict.sample_id
+					pred=self.transform_to_vocab(predict) 
+					for i in range(len(raw_input_x)):
+						#print raw_input_x[i]
+						#print raw_input_y[i]
+						#print raw_input_target[i]
+						print "問句 : "+''.join(batch_x[i])
+						print "機器人回答(traniing) : "+''.join(out[i])
+						print "機器人回答(predicting) : "+''.join(pred[i])
+						#print predict[i]
+						#print output[i]
+						print "鄉民回答 : "+''.join(batch_y[i])
+						print predict[i]
+						print output[i]
+						print "============================="
+                			
+					if index%100==0:
 			
-			checkpoint = "data/trained_model.ckpt"
-                	saver = tf.train.Saver()
-                	saver.save(sess, checkpoint)
-                	print('Model Trained and Saved')
-			print self.vocab_to_int['<GO>']
-			print self.vocab_to_int['<PAD>']
-			print self.vocab_to_int['<EOS>']
-	'''	 			
-	def predict(self):
-                x=[[2,4,3,1],[2,3,2,1],[3,2,2,1]]
-                x_len=[3,3,3]
+						saver = tf.train.Saver()
+                				saver.save(sess, checkpoint)
+                				print "saved"
+					
+			saver = tf.train.Saver()
+                        saver.save(sess, checkpoint)
+                        print('Model Trained and Saved')
+		 			
+	def predict(self,x):
+                #x=[[2,4,3,1],[2,3,2,1],[3,2,2,1]]
+                #x_len=[3,3,3]
                 with tf.Session() as sess:
 			#writer = tf.summary.FileWriter("TensorBoard/", graph = sess.graph)
-			checkpoint = "data/trained_model.ckpt"
+			checkpoint = "data_test/trained_model.ckpt"
 			saver=tf.train.Saver()
 			saver.restore(sess,checkpoint)
                         tf.get_variable_scope().reuse_variables()
-                        result=sess.run([self.predict_gno],feed_dict={self.batch_size:[len(x)],self.inputs:x,
-                                        self.inputs_len:x_len,self.max_len:4})
-                        print result
+			x=x[0:35]
+			print x
+			x=self.transform_to_int(x)
+			#x=[[10,50,100,1111]]
+			x_len=[len(x[0])]
+			#x_len=[4]
+			result=sess.run([self.predict_gno],feed_dict={self.batch_size:[len(x)],self.inputs:x,
+                                       self.inputs_len:x_len,self.max_len:len(x[0])})
+                       	output=result[0][1]
+			#print result
+			out=self.transform_to_vocab(output)
+			
+			print ''.join(out[0])
+			return ''.join(out[0])
+			#count+=1
+			#if count>10:
+			#	bot_working=False	
                         #checkpoint = "data/trained_model.ckpt"
                         #saver = tf.train.Saver()
                         #saver.save(sess, checkpoint)
                         #print('Model Trained and Saved')
 
-	'''
+	
 if __name__== '__main__':
 	#voc_size=587498
 	voc_size=10
 	encoder=model(embedding_dim=18,rnn_size=128)
 	encoder.train()
-#	encoder.predict()
+	#while True:
+		#x=raw_input()
+		#x=str(x).decode('utf8')
+		#tmp=jieba.cut(x, cut_all=False)
+		#input_x=[]
+		#for word in tmp:
+		#	input_x.append(word)
+		#encoder.predict([input_x])
 '''
 inputs = tf.placeholder(tf.float32, [None,4,1])
 cell = tf.nn.rnn_cell.BasicLSTMCell(num_units=10)
