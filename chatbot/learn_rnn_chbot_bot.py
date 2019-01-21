@@ -14,7 +14,7 @@ import jieba
 from sklearn.model_selection import train_test_split
 reload(sys)
 sys.setdefaultencoding('utf8')
-
+print "  "
 class model():
 	def __init__(self,embedding_dim,rnn_size):
 		with tf.name_scope("input_layer"):
