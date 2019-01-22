@@ -128,9 +128,8 @@ class model():
 	def decoder(self):
 		with tf.variable_scope("Decoder"):
                         encoder_outputs = tf.contrib.seq2seq.tile_batch(self.encoded_gno, multiplier=self.beam_size)
-                 	encoder_state = nest.map_structure(lambda s: tf.contrib.seq2seq.tile_batch(s, self.beam_size), self.h1)
-                 	
-			print tf.shape(encoder_state)
+                 	#encoder_state = nest.map_structure(lambda s: tf.contrib.seq2seq.tile_batch(s, self.beam_size), self.h1)
+                 	encoder_state=tf.contrib.seq2seq.tile_batch(self.h1, multiplier=self.beam_size)
 			encoder_inputs_length = tf.contrib.seq2seq.tile_batch(self.inputs_len, multiplier=self.beam_size)
 			#attention_mechanism = tf.contrib.seq2seq.BahdanauAttention(num_units=self.rnn_size, memory=encoder_outputs,
                                                                      #memory_sequence_length=encoder_inputs_length)
@@ -148,7 +147,6 @@ class model():
 			#cell = tf.nn.rnn_cell.BasicLSTMCell(num_units=self.rnn_size)
 			#output_layer = tf.layers.Dense(5,kernel_initializer=tf.truncated_normal_initializer(mean=0.1,stddev=0.1))
 			batch_size = self.batch_size * self.beam_size
-			print batch_size
 			#decoder_initial_state = cell.zero_state(batch_size=batch_size, dtype=tf.float32).clone(cell_state=encoder_state)
 			output_layer = tf.layers.Dense(self.index_size)
                 #with tf.variable_scope("Decoder"):
