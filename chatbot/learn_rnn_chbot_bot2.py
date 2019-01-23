@@ -21,7 +21,7 @@ class model():
 		with tf.name_scope("input_layer"):
 			#self.mode=mode
 			self.beam_size=2
-			self.number_layers=2
+			self.number_layers=1
 			self.rnn_size=rnn_size	
 			self.x_data,self.y_data,total_data=t.load_data() #read file
 			tmp_x_len=[]
@@ -146,10 +146,10 @@ class model():
                 #	lstm_cell = tf.contrib.rnn.LSTMCell(rnn_size,initializer=tf.random_uniform_initializer(-0.1,0.1,seed=2))
                 #	return lstm_cell
                 #decoder_cell =  tf.contrib.rnn.MultiRNNCell([get_decoder_cell(self.rnn_size) for _ in range(self.number_layers)])
-		#cell = tf.nn.rnn_cell.BasicLSTMCell(num_units=self.rnn_size)
-		decoder_cell = self._create_rnn_cell() 
+		cell = tf.nn.rnn_cell.BasicLSTMCell(num_units=self.rnn_size)
+		#decoder_cell = self._create_rnn_cell() 
 		#cell=decoder_cell
-		attention_cell = tf.contrib.seq2seq.AttentionWrapper(decoder_cell, attention_mechanism=attention_mechanism,
+		attention_cell = tf.contrib.seq2seq.AttentionWrapper(cell, attention_mechanism=attention_mechanism,
                                                               attention_layer_size=self.rnn_size, name='Attention_Wrapper')
 		#out_cell = tf.contrib.rnn.OutputProjectionWrapper(attention_cell, self.index_size/2, reuse=None)	
 		#decoder_initial_state = cell.zero_state(batch_size=batch_size, dtype=tf.float32).clone(cell_state=encoder_state)
@@ -159,13 +159,15 @@ class model():
 		#output_layer = tf.layers.Dense(5,kernel_initializer=tf.truncated_normal_initializer(mean=0.1,stddev=0.1))
 		#batch_size = self.batch_size * self.beam_size
 		batch_size=self.batch_size
+		#decoder_initial_state = nest.map_structure(lambda cell, is: attention_cell.zero_state(batch_size, 
+		#	tf.float32).clone(cell_state=is),attention_cell, self.h1)
 		decoder_initial_state = attention_cell.zero_state(batch_size=batch_size, dtype=tf.float32).clone(cell_state=self.h1)
-		
+		#decoder_initial_state=tuple(decoder_initial_state)
 		print "===================================="
 		print attention_cell
 		print decoder_initial_state
 		print "===================================="
-		#print cell
+		#print cell.get_shape()
 		#print self.h1
 		#print "====================================="
 		#print 
