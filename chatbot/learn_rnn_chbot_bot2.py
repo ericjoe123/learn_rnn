@@ -17,36 +17,36 @@ reload(sys)
 sys.setdefaultencoding('utf8')
 
 class model():
-	def __init__(self,embedding_dim,rnn_size):
-		with tf.name_scope("input_layer"):
-			#self.mode=mode
-			self.beam_size=2
-			self.number_layers=1
-			self.rnn_size=rnn_size	
-			self.x_data,self.y_data,total_data=t.load_data() #read file
-			tmp_x_len=[]
-			#---find the max len of x_seq---
-			for x_batch in self.x_data:
-				tmp_x_len.append(len(x_batch))
-			self.x_max_len = max(tmp_x_len)
-			print self.x_max_len
-			#----------------------------
-			self.int_to_vocab,self.vocab_to_int=self.get_dict(total_data)#build the dict of vocav2int and  int2vocab 
-			self.index_size=len(self.vocab_to_int)	
-			self.max_len=tf.placeholder(tf.int32,shape=(),name="max_len")
-			self.inputs = tf.placeholder(tf.int32, [None,None])
-			self.batch_size= tf.placeholder(tf.int32,[None])
-			self.encoder_input = tf.placeholder(tf.int32, [None,None])
-			self.target = tf.placeholder(tf.int32, [None,None])
-			self.inputs_len = tf.placeholder(tf.int32, [None,])
-			self.target_len = tf.placeholder(tf.int32, [None,])
-		with tf.name_scope("embedding_layer"):
-			self.embedding_dim=embedding_dim
-			self.embedded_gno = tf.contrib.layers.embed_sequence(self.inputs,self.index_size,self.embedding_dim)
-			self.embeddings_var = tf.get_variable("embedding_var", [self.index_size,self.embedding_dim])
-			#self.embeddings_var = tf.Variable(tf.truncated_normal(shape=[5, 2], stddev=0.1),name='encoder_embedding')
-			#self.embedded_gno = tf.nn.embedding_lookup(self.embeddings_var,self.inputs )
-			self.embedded_target = tf.nn.embedding_lookup(self.embeddings_var,self.encoder_input)
+	def __init__(self,embedding_dim,rnn_size,mode):
+		#with tf.name_scope("input_layer"):
+		self.mode=mode
+		self.beam_size=2
+		self.number_layers=2
+		self.rnn_size=rnn_size	
+		self.x_data,self.y_data,total_data=t.load_data() #read file
+		tmp_x_len=[]
+		#---find the max len of x_seq---
+		for x_batch in self.x_data:
+			tmp_x_len.append(len(x_batch))
+		self.x_max_len = max(tmp_x_len)
+		print self.x_max_len
+		#----------------------------
+		self.int_to_vocab,self.vocab_to_int=self.get_dict(total_data)#build the dict of vocav2int and  int2vocab 
+		self.index_size=len(self.vocab_to_int)	
+		self.max_len=tf.placeholder(tf.int32,shape=(),name="max_len")
+		self.inputs = tf.placeholder(tf.int32, [None,None])
+		self.batch_size= tf.placeholder(tf.int32,[])
+		self.encoder_input = tf.placeholder(tf.int32, [None,None])
+		self.target = tf.placeholder(tf.int32, [None,None])
+		self.inputs_len = tf.placeholder(tf.int32, [None,])
+		self.target_len = tf.placeholder(tf.int32, [None,])
+		#with tf.name_scope("embedding_layer"):
+		self.embedding_dim=embedding_dim
+		#self.embedded_gno = tf.contrib.layers.embed_sequence(self.inputs,self.index_size,self.embedding_dim)
+		self.embeddings_var = tf.get_variable("embedding_var", [self.index_size,self.embedding_dim])
+		#self.embeddings_var = tf.Variable(tf.truncated_normal(shape=[5, 2], stddev=0.1),name='encoder_embedding')
+		self.embedded_gno = tf.nn.embedding_lookup(self.embeddings_var,self.inputs )
+		self.embedded_target = tf.nn.embedding_lookup(self.embeddings_var,self.encoder_input)
 		self.encoded_gno,self.h1 = self.encoder()
                 self.trained_gno,self.predict_gno = self.decoder()	
 		self.loss , self.loss_training = self.optimize("op")
@@ -131,70 +131,56 @@ class model():
         		#	return lstm_cell
     			#cell =  tf.contrib.rnn.MultiRNNCell([get_encoder_cell(self.rnn_size) for _ in range(self.number_layers)])
 			cell=self._create_rnn_cell()
-			#cell = tf.nn.rnn_cell.BasicLSTMCell(num_units=self.rnn_size) 
+			#cell  = tf.contrib.rnn.LSTMCell(self.rnn_size) 
 			outputs, h1 = tf.nn.dynamic_rnn(cell, self.embedded_gno,sequence_length=self.inputs_len,dtype=tf.float32)
 			return outputs,h1
 	def decoder(self):
-		#with tf.variable_scope("Decoder"):
-                #encoder_outputs = tf.contrib.seq2seq.tile_batch(self.encoded_gno, multiplier=self.beam_size)
-                ##encoder_state = nest.map_structure(lambda s: tf.contrib.seq2seq.tile_batch(s, self.beam_size), self.h1)
-                #encoder_state=tf.contrib.seq2seq.tile_batch(self.h1, multiplier=self.beam_size)
-		#encoder_inputs_length = tf.contrib.seq2seq.tile_batch(self.inputs_len, multiplier=self.beam_size)
-		attention_mechanism = tf.contrib.seq2seq.BahdanauAttention(num_units=self.rnn_size, memory=self.encoded_gno,
-                                                                     memory_sequence_length=self.inputs_len)
-		#def get_decoder_cell(rnn_size):
-                #	lstm_cell = tf.contrib.rnn.LSTMCell(rnn_size,initializer=tf.random_uniform_initializer(-0.1,0.1,seed=2))
-                #	return lstm_cell
-                #decoder_cell =  tf.contrib.rnn.MultiRNNCell([get_decoder_cell(self.rnn_size) for _ in range(self.number_layers)])
-		cell = tf.nn.rnn_cell.BasicLSTMCell(num_units=self.rnn_size)
-		#decoder_cell = self._create_rnn_cell() 
-		#cell=decoder_cell
-		attention_cell = tf.contrib.seq2seq.AttentionWrapper(cell, attention_mechanism=attention_mechanism,
-                                                              attention_layer_size=self.rnn_size, name='Attention_Wrapper')
-		#out_cell = tf.contrib.rnn.OutputProjectionWrapper(attention_cell, self.index_size/2, reuse=None)	
-		#decoder_initial_state = cell.zero_state(batch_size=batch_size, dtype=tf.float32).clone(cell_state=encoder_state)
-		#with tf.name_scope("Decoder"):
-		#cell = tf.contrib.rnn.LSTMCell(self.rnn_size)
-		#cell = tf.nn.rnn_cell.BasicLSTMCell(num_units=self.rnn_size)
-		#output_layer = tf.layers.Dense(5,kernel_initializer=tf.truncated_normal_initializer(mean=0.1,stddev=0.1))
-		#batch_size = self.batch_size * self.beam_size
-		batch_size=self.batch_size
-		#decoder_initial_state = nest.map_structure(lambda cell, is: attention_cell.zero_state(batch_size, 
-		#	tf.float32).clone(cell_state=is),attention_cell, self.h1)
-		decoder_initial_state = attention_cell.zero_state(batch_size=batch_size, dtype=tf.float32).clone(cell_state=self.h1)
-		#decoder_initial_state=tuple(decoder_initial_state)
-		print "===================================="
-		print attention_cell
-		print decoder_initial_state
-		print "===================================="
-		#print cell.get_shape()
-		#print self.h1
-		#print "====================================="
-		#print 
-		output_layer = tf.layers.Dense(self.index_size)
-		with tf.variable_scope("Decoder"):
+                with tf.variable_scope("Decoder"):
+                        output_layer = tf.layers.Dense(self.index_size)
+			decoder_cell = self._create_rnn_cell()
+			
+			encoder_outputs = tf.contrib.seq2seq.tile_batch(self.encoded_gno, multiplier=self.beam_size)
+                	encoder_state = nest.map_structure(lambda s: tf.contrib.seq2seq.tile_batch(s, self.beam_size), self.h1)
+                	#encoder_state=tf.contrib.seq2seq.tile_batch(self.h1, multiplier=self.beam_size)
+			encoder_inputs_length = tf.contrib.seq2seq.tile_batch(self.inputs_len, multiplier=self.beam_size)
+			
+			training_helper = tf.contrib.seq2seq.TrainingHelper(inputs = self.embedded_target,
+                                                           sequence_length = self.target_len,
+                                                          time_major = False)
+                        training_decoder = tf.contrib.seq2seq.BasicDecoder(decoder_cell,training_helper, self.h1,output_layer)
+                        training_decoder_output,_,_ = tf.contrib.seq2seq.dynamic_decode(training_decoder,impute_finished=True,
+                                                                        maximum_iterations = self.max_len)
+			
+			'''
+			attention_mechanism = tf.contrib.seq2seq.BahdanauAttention(num_units=self.rnn_size ,memory=self.encoded_gno,
+                                                                     memory_sequence_length=self.inputs_len) 
+			attention_cell = tf.contrib.seq2seq.AttentionWrapper(decoder_cell, attention_mechanism=attention_mechanism,
+                	                                              attention_layer_size=self.rnn_size, name='Attention_Wrapper')
+			decoder_initial_state = attention_cell.zero_state(self.batch_size, dtype=tf.float32).clone(cell_state=self.h1)
+			
                         training_helper = tf.contrib.seq2seq.TrainingHelper(inputs = self.embedded_target,
                                                            sequence_length = self.target_len,
                                                           time_major = False)
-                        training_decoder = tf.contrib.seq2seq.BasicDecoder(attention_cell,training_helper,decoder_initial_state,output_layer)
+                        training_decoder = tf.contrib.seq2seq.BasicDecoder(attention_cell,training_helper, decoder_initial_state,output_layer)
                         training_decoder_output,_,_ = tf.contrib.seq2seq.dynamic_decode(training_decoder,impute_finished=True,
                                                                         maximum_iterations = self.max_len)
-                        out_train=training_decoder_output
-		#with tf.variable_scope("Decoder",reuse=True):
-			#start_tokens = tf.tile(tf.constant([self.vocab_to_int['<GO>']],dtype=tf.int32),self.batch_size,name='start_token')
-			#end_tokens = self.vocab_to_int['<EOS>']
-				
-			#helper = tf.contrib.seq2seq.GreedyEmbeddingHelper(self.embeddings_var,start_tokens,tf.constant(self.vocab_to_int['<EOS>']))
-			
-			#helper = tf.contrib.seq2seq.GreedyEmbeddingHelper(self.embeddings_var,start_tokens,end_tokens)
-			#predicting_decoder = tf.contrib.seq2seq.BeamSearchDecoder(cell,helper,self.h1,output_layer)
-			#predicting_decoder = tf.contrib.seq2seq.BasicDecoder(attention_cell,helper,decoder_initial_state,output_layer)
-			#predicting_decoder_output,_,_ = tf.contrib.seq2seq.dynamic_decode(predicting_decoder,
-			#								impute_finished = True,
-			#							maximum_iterations = self.max_len)
-			#out_predict=predicting_decoder_output
+                        
 			'''
-			beam_decoder = tf.contrib.seq2seq.BeamSearchDecoder(cell, embedding=self.embeddings_var,
+			out_train=training_decoder_output
+		
+			
+			start_tokens = tf.tile(tf.constant([self.vocab_to_int['<GO>']],dtype=tf.int32),[self.batch_size],name='start_token')
+			end_tokens = self.vocab_to_int['<EOS>']
+			
+			greedy_helper = tf.contrib.seq2seq.GreedyEmbeddingHelper(self.embeddings_var,start_tokens,end_tokens)
+			predicting_decoder = tf.contrib.seq2seq.BasicDecoder(decoder_cell,greedy_helper,self.h1,output_layer)
+			predicting_decoder_output,_,_ = tf.contrib.seq2seq.dynamic_decode(predicting_decoder,
+											impute_finished = True,
+										maximum_iterations = self.max_len)
+			out_predict=predicting_decoder_output
+			'''
+			#elif self.mode=='beam':
+			beam_decoder = tf.contrib.seq2seq.BeamSearchDecoder(decoder_cell, embedding=self.embeddings_var,
                                                                              start_tokens=start_tokens, end_token=end_tokens,
                                                                              initial_state=encoder_state,
                                                                              beam_width=self.beam_size,
@@ -204,8 +190,8 @@ class model():
 			
 			out_predict = beam_decoder_output
 			'''
-			out_predict=True
-			#predict_logits = tf.identity(predicting_decoder_output.rnn_output,'predict')
+			#else:
+			#	out_predict=None
 		return  out_train,out_predict
         def optimize(self,op):
                 #predict_logits = tf.identity(self.trained_gno.rnn_output,'predict')
@@ -220,10 +206,10 @@ class model():
 			#return masks,self.target
 			global lr
                 	optimizer = tf.train.AdamOptimizer(0.01)
-                	gradients = optimizer.compute_gradients(cost_training)
-                	capped_gradients = [(tf.clip_by_value(grad, -5., 5.), var) for grad, var in gradients if grad is not None]
-                	train_op = optimizer.apply_gradients(capped_gradients)
-                	#train_op=optimizer.minimize(cost)
+                	#gradients = optimizer.compute_gradients(cost_training)
+                	#capped_gradients = [(tf.clip_by_value(grad, -5., 5.), var) for grad, var in gradients if grad is not None]
+                	#train_op = optimizer.apply_gradients(capped_gradients)
+                	train_op=optimizer.minimize(cost_training)
                 	loss_training=tf.summary.scalar('loss_training', cost_training)
 			return  [train_op,cost_training],loss_training
 		elif op=="eva":
@@ -249,7 +235,7 @@ class model():
 			total_data_len=len(self.x_data)
 			global lr
 			lr=0.7
-			epoch=10
+			epoch=100
 			loss=1000
 			
 			for index in range(0,len(self.x_data)):
@@ -262,8 +248,10 @@ class model():
 				cut_index=(total_data_len/batch_size)-1
 			start=cut_index*batch_size
 			stop=cut_index*batch_size+batch_size
-			x_data_training=self.x_data[:start]+self.x_data[stop:]
-			y_data_training=self.y_data[:start]+self.y_data[stop:]
+			#x_data_training=self.x_data[:start]+self.x_data[stop:]
+			#y_data_training=self.y_data[:start]+self.y_data[stop:]
+			x_data_training=self.x_data
+			y_data_training=self.y_data
 			batch_x_test=self.x_data[start:stop]
 			batch_y_test=self.y_data[start:stop]
 			for epoch_times in range(0,epoch):
@@ -287,10 +275,10 @@ class model():
                 			y=self.transform_to_int(raw_input_y)
 		                	y_target=self.transform_to_int(raw_input_target)
 					#print max(x_len)	
-					#result = sess.run([self.predict_gno,self.trained_gno,self.loss],
-					result = sess.run([self.loss],
+					result = sess.run([self.predict_gno,self.trained_gno,self.loss],
+					#result = sess.run([self.loss],
 						feed_dict={
-						self.batch_size:[len(x)],
+						self.batch_size:len(x),
 						self.inputs:x,self.encoder_input:y,
 						self.target:y_target,
 						self.inputs_len:x_len,
@@ -306,7 +294,7 @@ class model():
 
 					test_result = sess.run([self.eva_loss],
                                                 feed_dict={
-                                                self.batch_size:[len(x_test)],
+                                                self.batch_size:len(x_test),
                                                 self.inputs:x_test,self.encoder_input:y_test,
                                                 self.target:y_target_test,
                                                 self.inputs_len:x_len_test,
@@ -315,34 +303,43 @@ class model():
 					
 					print "epoch : "+str(epoch_times)
 					print "batch : "+str(i)+"~"+str(i+batch_size)
-					#predict=result[0]
+					predict=result[0]
 					#print result[0]
-					#result=result[1:]
+					result=result[1:]
 					#loss=float(result[1][1])
-					loss=result
+					loss=result[1]
 					print "training loss: "+str(loss)
 					print "testing loss: "+str(test_result[0])
 					print "total word number: "+str(len(self.int_to_vocab))
 					print "step: "+str(step)
 					
 					print lr
-					'''							
+												
 					output=result[0].sample_id
 					out=self.transform_to_vocab(output)
-							
+					predict=predict.sample_id
+                                        pred=self.transform_to_vocab(predict)
+					'''		
 					predict_beam=predict.predicted_ids
+					print len(predict_beam)
 					#=======fixing the beam_output to [ [x1,x2,x,...xn],[x1,x2...]...] ========
-					beam_output=[]
+					beam_output_1=[]
+					beam_output_2=[]
 					for seq_ids in predict_beam:
-						tmp=[]
-						for ids in seq_ids:
-							print ids
+						tmp_1=[]
+						tmp_2=[]
+						for ids in seq_ids:		
 							if ids[0] >0:
-								tmp.append(ids[0])
-						beam_output.append(tmp)
+								tmp_1.append( ids[0])
+							if ids[1] > 0:
+								tmp_2.append( ids[1])
+						beam_output_1.append(tmp_1)
+						beam_output_2.append(tmp_2)
 					#=========================================================================	
-					pred=self.transform_to_vocab(beam_output) 
-						
+					#print beam_output
+					pred1=self.transform_to_vocab(beam_output_1)
+			 		pred2=self.transform_to_vocab(beam_output_2)
+								
 					for i in range(len(raw_input_x)):
 						#print x[i]
 						#print raw_input_x[i]
@@ -351,6 +348,9 @@ class model():
 						print "問句 : "+''.join(batch_x[i][::-1])
 						print "機器人回答(traniing) : "+''.join(out[i])
 						print "機器人回答(predicting) : "+''.join(pred[i])
+						#print "機器人回答(predicting) : "+''.join(pred1[i])
+						#print "機器人回答(predicting) : "+''.join(pred2[i])
+						#print predict_beam[i]
 						#print predict[i]
 						#print output[i]
 						print "鄉民回答 : "+''.join(batch_y[i])
@@ -364,7 +364,7 @@ class model():
                                                 saver.save(sess, checkpoint)
 			                        result_graph = sess.run(self.loss_training,
                                                 feed_dict={
-                                                self.batch_size:[len(x)],
+                                                self.batch_size:len(x),
                                                 self.inputs:x,self.encoder_input:y,
                                                 self.target:y_target,
                                                 self.inputs_len:x_len,
@@ -374,7 +374,7 @@ class model():
 						writer.add_summary(result_graph, step)
 						result_graph2 = sess.run(self.loss_testing,
 						feed_dict={
-                                                self.batch_size:[len(x_test)],
+                                                self.batch_size:len(x_test),
                                                 self.inputs:x_test,self.encoder_input:y_test,
                                                 self.target:y_target_test,
                                                 self.inputs_len:x_len_test,
@@ -432,8 +432,8 @@ if __name__== '__main__':
 	voc_size=10
 	global lr
 	lr=0.7
-	encoder=model(embedding_dim=10,rnn_size=10)
-	encoder.train()
+	seq2seq=model(embedding_dim=128,rnn_size=128,mode="beam")
+	seq2seq.train()
 	#encoder.predict([[1969, 1793, 1867, 402, 2731, 0, 0, 0, 0, 0, 0, 0, 0]])
 	#encoder.predict([[1969, 1793, 1867, 402, 2731, 0, 0, 0]])
 	#encoder.predict([[856, 4088, 651, 6724, 1864, 4785, 5666, 2262, 0, 0, 0, 0, 0, 0, 0]])
